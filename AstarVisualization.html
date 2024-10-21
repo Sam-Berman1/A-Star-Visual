@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .cell {
+            stroke: #ddd;
+            stroke-width: 1px;
+            cursor: pointer;
+        }
+        .cleared {
+            fill: black
+        }
+        .start {
+            fill: green !important;
+        }
+        .end {
+            fill: red !important;
+        }
+        .path {
+            fill: rgb(235, 235, 93) !important;
+        }
+        .searched {
+            fill: lightblue !important;
+        }
+        .barrier {
+            fill: blue !important;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+    <title>Sam Berman's A* Pathfinding Visualization</title>
+</head>
+<body>
+
+<div id="ui">
+    <button id="startAStar">Start A*</button>
+    <button id="toggleBarrier">Toggle Barrier Mode</button>
+    <button id="clearGrid">Clear Grid</button>
+    <button id="toggleDataMode">Toggle Data Mode</button>
+    <p>Status: <span id="status">Waiting for input...</span></p>
+</div>
+
+<svg id="grid"></svg>
+
+<script>
+    const rows = Math.floor(window.innerHeight / 30);
+    const cols = Math.floor(window.innerWidth / 30);
+    const cellSize = Math.min(window.innerHeight / rows, window.innerWidth / cols);
+    const grid = [];
+    let startNode = null;
+    let endNode = null;
+    let barrierMode = false;
+    let dataMode = false; 
+    let isMouseDown = false;
+    let isAddingBarrier = true;
+    
+    // Create a div for the popup
+    const popup = document.createElement('div');
+    popup.style.position = 'absolute';
+    popup.style.backgroundColor = 'white';
+    popup.style.padding = '5px';
+    popup.style.border = '1px solid #ddd';
+    popup.style.borderRadius = '5px';
+    popup.style.boxShadow = '0 2px 5px rgba(0, 0, 0, 0.2)';
+    popup.style.display = 'none'; // Hidden by default
+    document.body.appendChild(popup);
+    
+    const svg = d3.select("#grid")
+        .attr("width", window.innerWidth)
+        .attr("height", window.innerHeight);
+    
+    // Create grid
+    for (let row = 0; row < rows; row++) {
+        grid[row] = [];
+        for (let col = 0; col < cols; col++) {
+            grid[row][col] = {
+                row: row,
+                col: col,
+                isStart: false,
+                isEnd: false,
+                isBarrier: false,
+                isSearched: false,
+                inOpenSet: false,
+                CgScore: 0, 
+                CfScore: Infinity, // Default to infinity initially
+                checkedNodes: [], // Store nodes that were checked
+                fScoreArray: [],
+                gScoreArray: []
+            };
+        }
+    }
+    
+    svg.selectAll(".cell")
+        .data(grid.flat())
+        .enter()
+        .append("rect")
+        .attr("class", "cell")
+        .attr("width", cellSize)
+        .attr("height", cellSize)
+        .attr("x", d => d.col * cellSize)
+        .attr("y", d => d.row * cellSize)
+        .on("mousedown", function (event, d) {
+            if (barrierMode) {
+                isMouseDown = true;
+                isAddingBarrier = !d.isBarrier;
+                applyBarrier(d3.select(this), d);
+            } else if (dataMode) {
+                showPopup(d3.select(this), d, event);
+            } else {
+                isMouseDown = true;
+                handleClick(d3.select(this), d);
+            }
+        })
+        .on("mousemove", function (event, d) {
+            if (barrierMode && isMouseDown) {
+                applyBarrier(d3.select(this), d);
+            }
+        })
+        .on("mouseup", function () {
+            isMouseDown = false;
+            hidePopup();
+        });
+    
+    d3.select(window).on("mouseup", function () {
+        isMouseDown = false;
+        hidePopup();
+    });
+    
+    function applyBarrier(cell, d) {
+        d.isBarrier = isAddingBarrier;
+        cell.classed("barrier", d.isBarrier);
+    }
+    
+    function handleClick(cell, d) {
+        if (!d.isBarrier) {
+            if (d === startNode) {
+                startNode = null;
+                cell.classed("start", false);
+            } else if (d === endNode) {
+                endNode = null;
+                cell.classed("end", false);
+            } else if (!startNode) {
+                startNode = d;
+                cell.classed("start", true);
+            } else if (!endNode) {
+                endNode = d;
+                cell.classed("end", true);
+            }
+        }
+    }
+
+    /* for data mode */
+    function showPopup(cell, d, event) {
+        const { row, col, isStart, isEnd, isBarrier, isSearched, inOpenSet, fScoreArray, gScoreArray, checkedNodes } = d;
+        popup.innerHTML = `
+            <strong>Location:</strong> (${row}, ${col})<br>
+            <strong>Start Node:</strong> ${isStart}<br>
+            <strong>End Node:</strong> ${isEnd}<br>
+            <strong>Barrier:</strong> ${isBarrier}<br>
+            <strong>Searched:</strong> ${isSearched}<br>
+            <strong>In Open Set:</strong> ${inOpenSet}<br>
+            <strong>gScore:</strong> [${gScoreArray.join(', ')}]<br>
+            <strong>fScore:</strong> [${fScoreArray.join(', ')}]<br>
+            <strong>Checked Nodes:</strong> ${checkedNodes.map(node => `(${node.row}, ${node.col})`).join(', ')}
+        `;
+        popup.style.left = `${event.pageX + 10}px`; // Adjust position to the right of the cursor
+        popup.style.top = `${event.pageY + 10}px`;
+        popup.style.display = 'block';
+    }
+    
+    function hidePopup() {
+        popup.style.display = 'none';
+    }
+    
+    /* Event handlers */
+    document.getElementById("startAStar").addEventListener("click", () => {
+        if (startNode && endNode) {
+            runAStar();
+        } else {
+            alert("Please select both a start and an end node.");
+        }
+    });
+    
+    document.getElementById("toggleBarrier").addEventListener("click", () => {
+        barrierMode = !barrierMode;
+        document.getElementById('status').textContent = barrierMode ? "Barrier mode ON" : "Barrier mode OFF";
+    });
+    
+    document.getElementById("clearGrid").addEventListener("click", () => {
+        stopSearch = true; // Stop any ongoing pathfinding     
+        // Reset all cells' classes
+        svg.selectAll(".cell")
+            .classed("start", false)
+            .classed("end", false)
+            .classed("barrier", false)
+            .classed("path", false)
+            .classed("searched", false)
+            .transition()
+            .duration(200)
+            .style("fill", "black"); // Ensure all cells are filled with black
+    
+        // Clear references to start and end nodes
+        startNode = null;
+        endNode = null;
+    
+        // Reset all grid cell attributes
+        grid.forEach(row => {
+            row.forEach(cell => {
+                cell.isStart = false;
+                cell.isEnd = false;
+                cell.isBarrier = false;
+                cell.isSearched = false;
+                cell.inOpenSet = false;
+                cell.CgScore = 0;
+                cell.CfScore = Infinity;
+                cell.checkedNodes = [];
+                cell.fScoreArray = [];
+                cell.gScoreArray = [];
+            });
+        });
+    
+        document.getElementById('status').textContent = "Grid cleared. Waiting for input...";
+    });
+    
+    // New toggle for data mode
+    document.getElementById("toggleDataMode").addEventListener("click", () => {
+        dataMode = !dataMode;
+        document.getElementById('status').textContent = dataMode ? "Data mode ON" : "Data mode OFF";
+    });
+    
+    /* Visualization */
+    function runAStar() {
+        stopSearch = false; // Reset control variable when starting a new search
+
+        const openSet = [startNode];
+        const cameFrom = new Map();
+        const gScore = { [getKey(startNode)]: 0 };
+        const fScore = { [getKey(startNode)]: heuristic(startNode, endNode) };
+        startNode.gScoreArray.push(gScore);
+        startNode.fScoreArray.push(fScore);
+
+        function getKey(node) {
+            return `${node.row},${node.col}`;
+        }
+        
+        function updateCellClass(node, className) {
+            const fillColor = className === "start" ? "green"
+                            : className === "end" ? "red"
+                            : className === "barrier" ? "blue"
+                            : className === "searched" ? "lightblue"
+                            : className === "path" ? "yellow"
+                            : "white"; // Default to white 
+        
+            d3.selectAll(".cell")
+                .filter(d => d === node)
+                .transition()
+                .duration(200) 
+                .style("fill", fillColor);
+        }
+
+        async function visualizeAStar() {
+            while (openSet.length > 0 && !stopSearch) {
+                const current = openSet.reduce((lowest, node) =>
+                    fScore[getKey(node)] < fScore[getKey(lowest)] ? node : lowest
+                );
+    
+                if (current === endNode) {
+                    document.getElementById('status').textContent = "End node found!";
+                    await reconstructPath(cameFrom, current);
+                    return;
+                }
+    
+                openSet.splice(openSet.indexOf(current), 1);
+                current.isSearched = true; // Mark current as searched
+
+                if (!current.checkedNodes.includes(current)) {  // remember all the nodes we checked before making final decison
+                    current.checkedNodes.push(current);
+                }
+                updateCellClass(current, "searched");
+    
+                for (const neighbor of getNeighbors(current)) {
+                    if (neighbor.isBarrier) continue;
+                    
+                    
+                    neighbor.isSearched = true; // we searched this node before making a decision
+                    if (!current.checkedNodes.includes(neighbor)) {  // remember all the nodes we checked before making final decison
+                        current.checkedNodes.push(neighbor);
+                    }
+                
+                    const tentativeGScore = gScore[getKey(current)] + 1;
+                    const neighborKey = getKey(neighbor);
+    
+                    if (tentativeGScore < (gScore[neighborKey] || Infinity)) {
+                        cameFrom.set(neighbor, current);
+                        gScore[neighborKey] = tentativeGScore;
+                        fScore[neighborKey] = tentativeGScore + heuristic(neighbor, endNode);
+                        neighbor.inOpenSet = true;
+                        neighbor.gScoreArray.push(gScore[neighborKey]); // preserve calculation for viewing
+                        neighbor.fScoreArray.push(fScore[neighborKey]);
+                        if (!openSet.some(n => n === neighbor)) {
+                            openSet.push(neighbor);
+                        }
+                        updateCellClass(neighbor, "searched");
+                    }
+                }
+    
+                await delay(50);
+            }
+
+            async function reconstructPath(cameFrom, current) {
+                while (cameFrom.has(current) && !stopSearch) {
+                    current = cameFrom.get(current);
+                    updateCellClass(current, "path");
+                    // Store the final path information
+
+                    await delay(50);
+                }
+            }
+        }
+    
+        visualizeAStar();
+    }
+    
+   
+    
+    function heuristic(nodeA, nodeB) {
+        const dRow = Math.abs(nodeA.row - nodeB.row);
+        const dCol = Math.abs(nodeA.col - nodeB.col);
+        return dRow + dCol;
+    }
+    
+    function getNeighbors(node) {
+        const neighbors = [];
+        const { row, col } = node;
+
+        if (row > 0) neighbors.push(grid[row - 1][col]);
+        if (row < rows - 1) neighbors.push(grid[row + 1][col]);
+        if (col > 0) neighbors.push(grid[row][col - 1]);
+        if (col < cols - 1) neighbors.push(grid[row][col + 1]);
+
+        if (row > 0 && col > 0) neighbors.push(grid[row - 1][col - 1]);
+        if (row > 0 && col < cols - 1) neighbors.push(grid[row - 1][col + 1]);
+        if (row < rows - 1 && col > 0) neighbors.push(grid[row + 1][col - 1]);
+        if (row < rows - 1 && col < cols - 1) neighbors.push(grid[row + 1][col + 1]);
+
+        return neighbors;
+    }
+
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+        
+</script>
+</body>
+</html>
