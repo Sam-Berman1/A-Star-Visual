@@ -8,7 +8,7 @@ I made this quick app to pair with my Data Science final presentation about Adja
 
 </p>
 <h3> License MIT </h3>
-<p>Copyright 2024 Sam Berman https://github.com/Sam-Berman1/A=Star-Visual
+<p>Copyright 2024 Sam Berman https://github.com/Sam-Berman1/A-Star-Visual
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
